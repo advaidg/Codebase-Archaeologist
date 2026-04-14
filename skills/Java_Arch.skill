@@ -1,0 +1,556 @@
+---
+name: codebase-archaeologist
+description: >
+  Deep analysis skill for Java applications using JSF, Spring MVC, or Spring Boot.
+  Trigger this whenever someone has a Java+JSF or Java+Spring repository and wants
+  to understand it, document it, or generate business/product requirements from it.
+  Common triggers: "analyze this Java project", "what does this Spring Boot app do?",
+  "explain this JSF application", "generate a PRD from this codebase", "document this
+  Java app", "onboard me to this project", "what is the architecture?", "reverse
+  engineer requirements from code", "create product documentation", "I inherited this
+  Java project", "map this Spring application", "audit this JSF app".
+  Produces: Tech Stack Card, Architecture Map, Data Model, API/Screen Inventory,
+  Business Rules extraction, and a full Product Requirements Document (PRD).
+  ALWAYS use this skill for Java+JSF or Java+Spring analysis — never freeform.
+---
+
+# Codebase Archaeologist — Java / JSF / Spring Edition 🏛️
+
+Analyzes Java applications (JSF, Spring MVC, Spring Boot) and produces structured
+knowledge artifacts including a **Product Requirements Document (PRD)** reverse-engineered
+from the codebase. Covers Java 6 through Java 25, all Spring and JSF generations.
+
+---
+
+## STEP 0 — TRIAGE (Always run first)
+
+```bash
+# 1. Project shape
+find . -maxdepth 3 \
+  -not -path '*/.git/*' -not -path '*/target/*' -not -path '*/build/*' \
+  -not -path '*/node_modules/*' -not -path '*/__pycache__/*' \
+  | sort
+
+# 2. Build files — foundation of all analysis
+find . \( -name "pom.xml" -o -name "build.gradle" -o -name "build.gradle.kts" \
+  -o -name "settings.gradle" -o -name "settings.xml" \) \
+  -not -path '*/target/*' | sort
+
+# 3. Web descriptor and config
+find . \( -name "web.xml" -o -name "faces-config.xml" -o -name "*.xhtml" \
+  -o -name "application.properties" -o -name "application.yml" \
+  -o -name "application-*.properties" -o -name "applicationContext*.xml" \
+  -o -name "spring*.xml" -o -name "beans*.xml" \
+  \) -not -path '*/target/*' | sort
+
+# 4. Java source roots
+find . -type d -name "java" -not -path '*/target/*' | head -5
+find . -type d -name "src" -not -path '*/target/*' | head -5
+
+# 5. JSF/Facelets views
+find . \( -name "*.xhtml" -o -name "*.jsf" -o -name "*.faces" \) \
+  -not -path '*/target/*' | sort
+
+# 6. Test presence
+find . -type d \( -name "test" -o -name "it" -o -name "integration-test" \) \
+  -not -path '*/target/*' | head -5
+```
+
+Write a **First Impression** (3 sentences): tech generation, apparent domain, overall health.
+
+---
+
+## STEP 1 — STACK IDENTIFICATION
+
+**Always read `references/jvm-stack.md` before proceeding.**
+
+Then produce the Tech Stack Card:
+
+```
+╔══════════════════════════════════════════════════════╗
+║              TECH STACK CARD                         ║
+╠══════════════════════════════════════════════════════╣
+║ Java Version   : [e.g. Java 8 / 11 / 17 / 21]       ║
+║ UI Framework   : [JSF 1.x / 2.x / 3.x / 4.x]        ║
+║                  [PrimeFaces / RichFaces / ICEfaces]  ║
+║                  [Spring MVC + Thymeleaf / FreeMarker]║
+║ Backend        : [Plain Spring 3/4/5 / Spring Boot   ║
+║                   1.x / 2.x / 3.x]                   ║
+║ Config Style   : [XML beans / Annotation / Boot auto] ║
+║ Build Tool     : [Maven / Gradle]                     ║
+║ Persistence    : [Spring Data JPA / Hibernate /       ║
+║                   MyBatis / jOOQ / plain JDBC]        ║
+║ Database       : [type + version if detectable]       ║
+║ Security       : [Spring Security version / JAAS /    ║
+║                   custom / none]                      ║
+║ App Server     : [Tomcat / JBoss / WildFly /          ║
+║                   WebLogic / embedded]                ║
+║ Messaging      : [Kafka / RabbitMQ / JMS / none]      ║
+║ Key Libraries  : [top 8 by importance]                ║
+║ Test Coverage  : [JUnit 4/5 + Mockito / none]         ║
+║ ⚠️ Flags       : [deprecated APIs, EOL versions, etc] ║
+╚══════════════════════════════════════════════════════╝
+```
+
+---
+
+## STEP 2 — ARCHITECTURE MAP
+
+### 2a. Module structure
+```bash
+# Maven multi-module
+grep "<module>" pom.xml settings.xml 2>/dev/null | head -20
+
+# Gradle multi-project
+cat settings.gradle settings.gradle.kts 2>/dev/null | grep "include"
+
+# Package structure (top-level domain packages)
+find src/main/java -type d -maxdepth 5 -not -path '*/target/*' | sort | head -40
+```
+
+### 2b. Layering pattern — identify and name it
+
+| Folder signals | Pattern name |
+|---|---|
+| `controller/` `service/` `repository/` `model/` | **Classic Spring Layered** |
+| `bean/` `backing/` `managed/` + `.xhtml` views | **JSF ManagedBean / CDI** |
+| `port/` `adapter/` `domain/` `application/` | **Hexagonal** |
+| `command/` `query/` `handler/` | **CQRS** |
+| Large classes, no clear structure | **Legacy / Big Ball of Mud** |
+
+### 2c. Entry point chain
+
+**For JSF apps:**
+```
+web.xml → FacesServlet (*.xhtml / *.jsf)
+  └── faces-config.xml → navigation rules + managed beans
+        └── @ManagedBean / @Named CDI bean
+              └── @EJB / @Autowired service
+                    └── @Repository / DAO
+                          └── Database
+```
+
+**For Spring Boot apps:**
+```
+@SpringBootApplication: com.example.Application
+  └── Autoconfiguration
+        └── @RestController / @Controller
+              └── @Service
+                    └── @Repository (JpaRepository)
+                          └── Database
+```
+
+**For Spring MVC (WAR) apps:**
+```
+web.xml → DispatcherServlet
+  └── applicationContext.xml / @Configuration
+        └── @Controller / @RequestMapping
+              └── @Service
+                    └── @Repository / DAO
+                          └── Database
+```
+
+### 2d. Mermaid Architecture Diagram
+Always generate this:
+
+```mermaid
+graph TB
+    Browser["🌐 Browser"]
+    
+    subgraph "Presentation Layer"
+        JSF["JSF/Facelets .xhtml\n(PrimeFaces components)"]
+        MB["@ManagedBean / @Named\nBacking Beans"]
+    end
+    
+    subgraph "Business Layer"
+        SVC["@Service / @Stateless EJB\nBusiness Services"]
+    end
+    
+    subgraph "Data Layer"
+        REPO["@Repository / DAO\nSpring Data JPA"]
+        DB[("Database\nPostgres / MySQL / Oracle")]
+    end
+    
+    subgraph "Cross-Cutting"
+        SEC["Spring Security\n/ JAAS"]
+        TX["@Transactional"]
+    end
+
+    Browser --> JSF --> MB --> SVC --> REPO --> DB
+    SEC -.-> MB
+    TX -.-> SVC
+```
+Adapt this diagram to match what's actually in the codebase.
+
+---
+
+## STEP 3 — SCREEN & FEATURE INVENTORY (JSF)
+
+For JSF applications, map every screen to its backing bean and function:
+
+```bash
+# All XHTML views
+find . -name "*.xhtml" -not -path '*/target/*' | sort
+
+# Managed beans / CDI beans
+grep -rn "@ManagedBean\|@Named\|@ViewScoped\|@SessionScoped\|@RequestScoped\|@ApplicationScoped" \
+  --include="*.java" . | grep -v test | grep -v target | head -40
+
+# Navigation rules
+cat src/main/webapp/WEB-INF/faces-config.xml 2>/dev/null | grep -A5 "navigation-rule"
+
+# PrimeFaces / RichFaces component usage
+grep -rn "p:\|rich:\|a4j:\|ice:" $(find . -name "*.xhtml" -not -path '*/target/*') \
+  | sed 's/.*<\([a-z]*:[a-z]*\).*/\1/' | sort | uniq -c | sort -rn | head -20
+```
+
+Produce a **Screen Inventory Table**:
+
+```
+## Screen Inventory
+
+| Screen (XHTML) | Backing Bean | Scope | Key Functions | Domain Area |
+|---|---|---|---|---|
+| login.xhtml | LoginBean | @RequestScoped | authenticate(), logout() | Auth |
+| dashboard.xhtml | DashboardBean | @ViewScoped | loadSummary(), refresh() | Home |
+| orders/list.xhtml | OrderListBean | @ViewScoped | search(), paginate(), export() | Orders |
+| orders/create.xhtml | OrderCreateBean | @ViewScoped | save(), validate(), cancel() | Orders |
+| ... | ... | ... | ... | ... |
+```
+
+---
+
+## STEP 4 — API SURFACE (Spring MVC / REST)
+
+```bash
+# REST endpoints
+grep -rn "@GetMapping\|@PostMapping\|@PutMapping\|@DeleteMapping\|@RequestMapping\|@PatchMapping" \
+  --include="*.java" . | grep -v test | grep -v target | head -40
+
+# Response types
+grep -rn "ResponseEntity\|@ResponseBody\|produces.*json\|MediaType.APPLICATION_JSON" \
+  --include="*.java" . | grep -v test | grep -v target | head -20
+
+# OpenAPI / Swagger
+find . \( -name "openapi*.yaml" -o -name "openapi*.json" \
+  -o -name "swagger*.yaml" -o -name "swagger*.json" \) | grep -v target | head -5
+```
+
+Produce an **API Inventory Table**:
+
+```
+## API Endpoints
+
+| Method | Path | Controller | Purpose | Auth Required |
+|---|---|---|---|---|
+| GET | /api/orders | OrderController | List all orders (paginated) | YES |
+| POST | /api/orders | OrderController | Create new order | YES |
+| GET | /api/orders/{id} | OrderController | Get order by ID | YES |
+```
+
+---
+
+## STEP 5 — DATA MODEL
+
+```bash
+# JPA Entities
+find . -name "*.java" -not -path '*/test*' -not -path '*/target/*' \
+  | xargs grep -l "@Entity" 2>/dev/null | sort
+
+# Read each entity file for fields and relationships
+grep -rn "@Entity\|@Table\|@Column\|@Id\|@GeneratedValue\|@OneToMany\|@ManyToOne\|@ManyToMany\|@OneToOne\|@JoinColumn" \
+  --include="*.java" . | grep -v test | grep -v target | head -60
+
+# DB migrations (read latest 5 for schema truth)
+find . \( -name "V*__*.sql" -o -path "*/db/migration/*.sql" -o -path "*/flyway/*.sql" \) \
+  -not -path '*/target/*' | sort | tail -5 | xargs cat 2>/dev/null
+```
+
+Produce an **Entity Relationship Summary**:
+
+```
+## Core Domain Entities
+
+### [EntityName]
+- **Table**: `table_name`
+- **Key Fields**: id (PK), field1, field2, ...
+- **Relationships**: 
+  - @OneToMany → [ChildEntity] (cascade ALL)
+  - @ManyToOne → [ParentEntity]
+- **Business Meaning**: [what this represents in the domain]
+
+### ...
+```
+
+---
+
+## STEP 6 — BUSINESS RULES EXTRACTION
+
+This step reverse-engineers business logic from the code into human-readable rules.
+
+```bash
+# Validation logic
+grep -rn "@NotNull\|@NotBlank\|@Size\|@Min\|@Max\|@Pattern\|@Valid\|@Validated" \
+  --include="*.java" . | grep -v test | grep -v target | head -30
+
+# Business exceptions (reveal rules)
+find . -name "*Exception*.java" -o -name "*Error*.java" | grep -v target | head -20
+
+# Status/state enums (reveal workflow)
+find . -name "*.java" -not -path '*/test*' -not -path '*/target/*' \
+  | xargs grep -l "^public enum" 2>/dev/null
+
+# Conditional business logic
+grep -rn "if.*status\|if.*role\|if.*type\|switch.*status" \
+  --include="*.java" . | grep -v test | grep -v target | head -20
+
+# Scheduled jobs
+grep -rn "@Scheduled\|@EnableScheduling\|QuartzJobBean\|JobDetail" \
+  --include="*.java" . | grep -v test | grep -v target | head -10
+```
+
+Produce a **Business Rules Register**:
+
+```
+## Business Rules Extracted from Code
+
+### Validation Rules
+- BR-001: [FieldName] must not be null (enforced by @NotNull on Entity.field)
+- BR-002: [FieldName] must be between X and Y characters
+- BR-003: [FieldName] must match pattern [regex] (e.g. email, phone)
+
+### Workflow / State Rules  
+- BR-010: Order can only transition: DRAFT → SUBMITTED → APPROVED → SHIPPED → DELIVERED
+- BR-011: Only users with role ADMIN can approve orders
+- BR-012: Orders > $10,000 require dual approval
+
+### Calculated / Derived Rules
+- BR-020: Total = sum(lineItems) + tax - discount
+- BR-021: Tax rate applied based on customer region
+
+### Scheduled Operations
+- BR-030: [JobName] runs daily at [cron] — purpose: [inferred]
+
+### Integration Rules
+- BR-040: On order approval, notify [external system] via [method]
+```
+
+---
+
+## STEP 7 — PRODUCT REQUIREMENTS DOCUMENT (PRD)
+
+**This is the primary business deliverable.** Synthesize everything from Steps 1–6.
+
+```markdown
+# Product Requirements Document
+## [Application Name] — Reverse Engineered from Codebase
+**Version**: 1.0 (Auto-generated)  
+**Source**: [repo name / path]  
+**Generated**: [date]  
+**Stack**: [Java X + JSF X / Spring Boot X]
+
+---
+
+## 1. Executive Summary
+
+### 1.1 Product Overview
+[2–3 paragraphs describing what the application does, who uses it, and what
+business problem it solves. Infer from: domain entity names, screen names,
+controller paths, package names, exception messages, and validation rules.]
+
+### 1.2 Business Context
+[Who is the primary user? What department or business process does this support?
+Infer from: entity names (Order, Invoice, Patient, Employee), screen names, roles.]
+
+### 1.3 Key Metrics / Scale Signals
+[Infer from: pagination settings, caching config, batch job sizes, DB indexes,
+connection pool settings. E.g. "Pagination at 25 rows suggests medium data volumes."]
+
+---
+
+## 2. User Roles & Permissions
+
+[Infer from Spring Security config, @Secured, @PreAuthorize, role enums, session beans]
+
+| Role | Description | Key Permissions |
+|------|-------------|-----------------|
+| [ROLE_ADMIN] | [inferred description] | [what they can do] |
+| [ROLE_USER] | [inferred description] | [what they can do] |
+| [ROLE_MANAGER] | [inferred description] | [what they can do] |
+
+---
+
+## 3. Functional Requirements
+
+### 3.1 Feature Areas
+[Group by domain module, screen group, or controller group]
+
+#### Feature Area 1: [e.g. Order Management]
+| ID | Requirement | Source (code location) | Priority (infer) |
+|----|-------------|----------------------|------------------|
+| FR-001 | User can create a new order with line items | OrderCreateBean.save() | HIGH |
+| FR-002 | User can search orders by date range and status | OrderListBean.search() | HIGH |
+| FR-003 | System validates order total > 0 before saving | OrderService validation | HIGH |
+| FR-004 | Admin can export order list to CSV | OrderListBean.export() | MED |
+
+#### Feature Area 2: [next domain area]
+...
+
+### 3.2 Screen-by-Screen Requirements
+[For each screen in the Screen Inventory, derive requirements]
+
+#### [Screen Name] (screen.xhtml)
+- **Purpose**: [what the user accomplishes on this screen]
+- **User Stories**:
+  - As a [role], I can [action] so that [outcome]
+  - ...
+- **Business Rules Applied**: [list BR-XXX codes]
+- **Data Displayed**: [entity fields shown]
+- **Actions Available**: [buttons / operations]
+
+---
+
+## 4. Non-Functional Requirements
+
+### 4.1 Performance
+[Infer from: connection pool size, caching annotations, pagination config,
+@Async usage, lazy loading settings]
+- [ ] Page load: [infer from architecture — JSF postback model vs REST]
+- [ ] Concurrent users: [infer from thread pool / session config]
+
+### 4.2 Security
+[Infer from Spring Security config, HTTPS config, CSRF settings, session config]
+- Authentication: [form login / OAuth2 / SAML / LDAP / custom]
+- Authorization: [role-based / method-level / URL-level]
+- Session management: [timeout value if found]
+- CSRF protection: [enabled/disabled]
+- Password policy: [if found in code]
+
+### 4.3 Data Integrity
+[Infer from @Transactional, FK constraints in migrations, validation annotations]
+- Transactions: [how they're managed]
+- Validation: [where applied — client / service / entity]
+- Referential integrity: [FK constraints found in SQL migrations]
+
+### 4.4 Deployment & Environment
+[Infer from Dockerfile, profiles, Makefile, README]
+- Target environment: [embedded Tomcat / JBoss / WAR deployment]
+- Configuration profiles: [dev, staging, prod — what each changes]
+- External dependencies: [DB, message broker, external APIs]
+
+---
+
+## 5. Data Requirements
+
+### 5.1 Core Entities
+[Paste Entity Relationship Summary from Step 5]
+
+### 5.2 Data Retention / Lifecycle
+[Infer from: soft delete fields (isDeleted, active), audit fields (createdAt, updatedAt),
+archive tables, scheduled cleanup jobs]
+
+### 5.3 Reporting & Export
+[Infer from: export methods, JasperReports/BIRT usage, scheduled report jobs,
+PDF generation libraries]
+
+---
+
+## 6. Integration Requirements
+
+```bash
+# Detect external integrations
+grep -rn "RestTemplate\|WebClient\|RestClient\|FeignClient\|HttpClient\|URLConnection" \
+  --include="*.java" . | grep -v test | grep -v target | head -20
+
+grep -rn "@WebServiceClient\|@WebService\|SOAPMessage\|JAXBContext" \
+  --include="*.java" . | grep -v test | grep -v target | head -10
+
+grep -rn "JmsTemplate\|KafkaTemplate\|RabbitTemplate\|SqsClient" \
+  --include="*.java" . | grep -v test | grep -v target | head -10
+```
+
+| Integration | Type | Direction | Purpose |
+|-------------|------|-----------|---------|
+| [System name] | REST / SOAP / JMS / Kafka | Inbound / Outbound | [inferred purpose] |
+
+---
+
+## 7. Assumptions & Open Questions
+
+[List things that could not be determined from code alone]
+
+- ❓ **[Topic]**: [What was unclear and why]
+- ❓ **Business owner**: Could not be determined from code
+- ❓ **SLA / uptime requirement**: Not found in configuration
+- ❓ **[Screen/feature]**: Logic present but business intent unclear
+
+---
+
+## 8. Recommended Improvements
+
+[From Step 4 legacy flags — translate technical debt into business risk language]
+
+| Issue | Business Risk | Recommendation |
+|-------|--------------|----------------|
+| Spring Boot 1.x (EOL) | Security vulnerabilities, no vendor patches | Upgrade to Spring Boot 3.x |
+| No test coverage | High regression risk during changes | Add JUnit 5 + integration tests |
+| WebSecurityConfigurerAdapter (deprecated) | Future incompatibility | Migrate to SecurityFilterChain |
+| Field @Autowired throughout | Developer velocity drag | Refactor to constructor injection |
+```
+
+---
+
+## STEP 8 — DEVELOPER QUICK-START
+
+```markdown
+# Developer Quick-Start
+
+## Prerequistes
+[Infer from pom.xml / build.gradle: JDK version, Maven/Gradle version]
+
+## Run Locally
+[Infer from README, Makefile, docker-compose.yml, application-local.properties]
+
+## Key Configuration
+[List the most important application.properties / application.yml keys]
+
+## Package Structure
+```
+src/main/java/
+  com.example.[domain]/
+    controller/     ← Spring MVC @Controller or JSF backing beans  
+    service/        ← Business logic (@Service)
+    repository/     ← Data access (@Repository / JpaRepository)
+    entity/         ← JPA @Entity classes
+    dto/            ← Data Transfer Objects
+    config/         ← @Configuration classes
+    security/       ← Spring Security config
+src/main/resources/
+  application.yml   ← Main configuration
+  db/migration/     ← Flyway SQL migrations
+src/main/webapp/
+  WEB-INF/
+    faces-config.xml ← JSF navigation + beans (legacy)
+  pages/            ← XHTML Facelets views
+```
+
+## Top 5 Classes to Read First
+[List actual class names found — most important service + controller + entity]
+```
+
+---
+
+## QUALITY CHECKLIST
+
+Before delivering:
+
+- [ ] Every file path referenced actually exists in the repo
+- [ ] No invented class names or package paths
+- [ ] JSF version confirmed (1.x vs 2.x vs 3.x vs 4.x)
+- [ ] Spring era confirmed (XML / Boot 1 / Boot 2 / Boot 3)
+- [ ] Java version confirmed from build files
+- [ ] PRD Section 1 written in plain business English (no Java jargon)
+- [ ] Business Rules are phrased as rules, not code descriptions
+- [ ] Screen Inventory covers every .xhtml file found
+- [ ] Open Questions section is honest about gaps
+- [ ] Recommended Improvements framed as business risk, not tech debt
